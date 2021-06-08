@@ -1,0 +1,720 @@
+/*
+ * This file is part of the GeOxygene project source files. 
+ * 
+ * GeOxygene aims at providing an open framework which implements OGC/ISO specifications for 
+ * the development and deployment of geographic (GIS) applications. It is a open source 
+ * contribution of the COGIT laboratory at the Institut Gï¿½ographique National (the French 
+ * National Mapping Agency).
+ * 
+ * See: http://oxygene-project.sourceforge.net 
+ *  
+ * Copyright (C) 2005 Institut Gï¿½ographique National
+ *
+ * This library is free software; you can redistribute it and/or modify it under the terms
+ * of the GNU Lesser General Public License as published by the Free Software Foundation; 
+ * either version 2.1 of the License, or any later version.
+ *
+ * This library is distributed in the hope that it will be useful, but WITHOUT ANY 
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A 
+ * PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with 
+ * this library (see file LICENSE if present); if not, write to the Free Software 
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *  
+ */
+
+options {
+    STATIC=false;
+}
+
+PARSER_BEGIN(WktGeOxygene)
+
+package fr.ign.cogit.geoxygene.util.conversion;
+
+import java.util.StringTokenizer;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Iterator;
+
+import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.File;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.io.IOException;
+import java.io.FileNotFoundException;
+import java.io.ByteArrayInputStream;
+
+import fr.ign.cogit.geoxygene.api.spatial.coordgeom.IDirectPosition;
+import fr.ign.cogit.geoxygene.api.spatial.coordgeom.ILineString;
+import fr.ign.cogit.geoxygene.api.spatial.coordgeom.IPolygon;
+import fr.ign.cogit.geoxygene.api.spatial.geomaggr.IAggregate;
+import fr.ign.cogit.geoxygene.api.spatial.geomaggr.IMultiCurve;
+import fr.ign.cogit.geoxygene.api.spatial.geomaggr.IMultiPoint;
+import fr.ign.cogit.geoxygene.api.spatial.geomaggr.IMultiSurface;
+import fr.ign.cogit.geoxygene.api.spatial.geomprim.IPoint;
+import fr.ign.cogit.geoxygene.api.spatial.geomprim.IRing;
+import fr.ign.cogit.geoxygene.api.spatial.geomroot.IGeometry;
+import fr.ign.cogit.geoxygene.spatial.coordgeom.DirectPosition;
+import fr.ign.cogit.geoxygene.spatial.coordgeom.GM_LineString;
+import fr.ign.cogit.geoxygene.spatial.coordgeom.GM_Polygon;
+import fr.ign.cogit.geoxygene.spatial.geomaggr.GM_Aggregate;
+import fr.ign.cogit.geoxygene.spatial.geomaggr.GM_MultiCurve;
+import fr.ign.cogit.geoxygene.spatial.geomaggr.GM_MultiPoint;
+import fr.ign.cogit.geoxygene.spatial.geomaggr.GM_MultiSurface;
+import fr.ign.cogit.geoxygene.spatial.geomprim.GM_Point;
+import fr.ign.cogit.geoxygene.spatial.geomprim.GM_Ring;
+
+
+@SuppressWarnings("unchecked")
+public class WktGeOxygene
+{
+    static class EndOfFile extends Exception {private static final long serialVersionUID = 1L;}
+    static class EmptyLine extends Exception {private static final long serialVersionUID = 1L;}
+    
+    /*-----------------------------------------------------*/
+    /*- Create Wkt object(s) from IGeometry ---------------*/
+    /*-----------------------------------------------------*/
+
+    /*- IAggregate --------------------------------------*/
+
+    static String geometryCollectionTaggedText(IAggregate aggregate) 
+    {
+        StringBuffer result=new StringBuffer();
+        result.append("GEOMETRYCOLLECTION ");
+        if (IsEmptyUtil.isEmpty(aggregate)) result.append("EMPTY");
+        else {
+	        result.append("(");
+	        for (int i=0; i<aggregate.size(); i++) {
+	            if (i!=0)
+	                result.append(", ");
+	            result.append(makeWkt(aggregate.get(i)));
+	        }
+	        result.append(")");
+        }
+        return result.toString();
+    }
+
+    /*- IMultiPoint -------------------------------------*/
+
+    static String multiPointTaggedText(IMultiPoint multiPoint) 
+    {
+        IPoint point;
+        StringBuffer result=new StringBuffer();
+        result.append("MULTIPOINT ");
+        if (IsEmptyUtil.isEmpty(multiPoint)) result.append("EMPTY");
+        else {
+	        result.append("(");
+	        for (int i=0; i<multiPoint.size(); i++) {
+	            point=multiPoint.get(i);
+	            if (i!=0)
+	                result.append(", ");
+	            result.append(point(point));
+	        }
+	        result.append(")");
+        }
+        return result.toString();
+    }
+
+    /*- GM_MultiCurve -------------------------------------*/
+
+    static String multiLineStringTaggedText(IMultiCurve multiCurve) 
+    {
+        ILineString lineString;
+        StringBuffer result=new StringBuffer();
+        result.append("MULTILINESTRING ");
+        if (IsEmptyUtil.isEmpty(multiCurve)) result.append("EMPTY");
+        else {
+	        result.append("(");
+	        for (int i=0; i<multiCurve.size(); i++) {
+	            lineString=(ILineString)multiCurve.get(i);
+	            if (i!=0)
+	                result.append(", ");
+	            result.append(lineStringText(lineString));
+	        }
+	        result.append(")");
+        }
+        return result.toString();
+    }
+
+    /*- IMultiSurface -----------------------------------*/
+
+	static String multiPolygon(IMultiSurface multiSurface)
+	{
+        StringBuffer result=new StringBuffer();
+        for (int i=0; i<multiSurface.size(); i++) {
+  			IGeometry surface;
+            surface=multiSurface.get(i);
+            if (i!=0)
+                result.append(", ");
+            if (surface instanceof IPolygon)
+            	result.append(polygonText((IPolygon)surface));
+        	else if (surface instanceof IMultiSurface)
+        		result.append(multiPolygon((IMultiSurface)surface)); 
+        }
+        return result.toString();
+	}
+
+	static String multiPolygonText(IMultiSurface multiSurface)
+	{
+        StringBuffer result=new StringBuffer();
+        result.append("(");
+		result.append(multiPolygon(multiSurface));
+        result.append(")");
+		return result.toString();
+	}
+
+    static String multiPolygonTaggedText(IMultiSurface multiSurface) 
+    {
+        StringBuffer result=new StringBuffer();
+        result.append("MULTIPOLYGON ");
+        if (IsEmptyUtil.isEmpty(multiSurface)) result.append("EMPTY");
+        else {
+			result.append(multiPolygonText(multiSurface));
+	    }
+        return result.toString();
+    }
+
+    /*- ILineString -------------------------------------*/
+
+    static String lineStringText(ILineString lineString)
+    {
+        IPoint point;
+        StringBuffer result=new StringBuffer();
+        result.append("(");
+        for (int i=0; i<lineString.sizeControlPoint(); i++) {
+            point=new GM_Point(lineString.getControlPoint(i));
+            if (i!=0)
+                result.append(", ");
+            result.append(point(point));
+        }
+        result.append(")");
+        return result.toString();
+    }
+
+    static String lineStringTaggedText(ILineString lineString) 
+    {
+        StringBuffer result=new StringBuffer();
+        result.append("LINESTRING ");
+        if (IsEmptyUtil.isEmpty(lineString)) result.append("EMPTY");
+        else result.append(lineStringText(lineString));
+        
+        return result.toString();
+    }
+
+    /*- IPolygon ----------------------------------------*/
+
+    static String polygonText(IPolygon polygon)
+    {
+        ILineString lineString;
+
+        StringBuffer result=new StringBuffer();
+        result.append("("); 
+        
+        lineString=polygon.exteriorLineString();
+        result.append(lineStringText(lineString));
+
+        for (int i=0; i<polygon.sizeInterior(); i++) {
+            lineString=polygon.interiorLineString(i);
+            result.append(", ");
+            result.append(lineStringText(lineString));
+        }
+        result.append(")");
+        return result.toString();
+    }
+
+    static String polygonTaggedText(IPolygon polygon) 
+    {
+        StringBuffer result=new StringBuffer();
+        result.append("POLYGON ");
+        if (IsEmptyUtil.isEmpty(polygon)) result.append("EMPTY");
+        else result.append(polygonText(polygon));
+        return result.toString();
+    }
+
+    /*- IPoint ------------------------------------------*/
+
+//TODO déterminer la dimension de la géométrie attendue par postgis
+    static String point(IPoint point)
+    {
+        IDirectPosition position=point.getPosition();
+        StringBuffer result=new StringBuffer();
+        result.append(position.getX());
+        result.append(" ");
+        result.append(position.getY());
+		if (!Double.isNaN(position.getZ())) {
+			result.append(" ");
+			result.append(position.getZ());
+		}        
+        return result.toString();
+    }
+
+    static String pointText(IPoint point)
+    {
+        StringBuffer result=new StringBuffer();
+        result.append("(");
+        result.append(point(point));
+        result.append(")");
+        return result.toString();
+    }
+
+    static String pointTaggedText(IPoint point) 
+    {
+        StringBuffer result=new StringBuffer();
+        result.append("POINT ");
+        if (IsEmptyUtil.isEmpty(point)) result.append("EMPTY");
+        else result.append(pointText(point));
+        return result.toString();
+    }
+    
+    /*- IRing -----------------------------------------*/
+    
+    private static String ringTaggedText(IRing ring) {
+		StringBuffer result=new StringBuffer();
+		result.append("RING ");
+		if (IsEmptyUtil.isEmpty(ring)) result.append("EMPTY");
+		else result.append(ringText(ring));
+		return result.toString();
+	}
+
+	private static Object ringText(IRing ring) {
+		IPoint point;
+		StringBuffer result=new StringBuffer();
+		result.append("(");
+		for (int i=0; i<ring.coord().size(); i++) {
+			point=new GM_Point(ring.coord().get(i));
+			if (i!=0)
+				result.append(", ");
+			result.append(point(point));
+		}
+		result.append(")");
+		return result.toString();
+	}
+
+    /*- IGeometry -----------------------------------------*/
+
+	public static String makeWkt(IGeometry object)
+	{
+		String result="POINT EMPTY";
+		if (object instanceof IPoint)
+			result=pointTaggedText((IPoint)object);
+		else if (object instanceof IMultiSurface)
+			result=multiPolygonTaggedText((IMultiSurface)object);
+		else if (object instanceof IMultiCurve)
+			result=multiLineStringTaggedText((IMultiCurve)object);
+		else if (object instanceof IMultiPoint)
+			result=multiPointTaggedText((IMultiPoint)object);
+		else if (object instanceof IPolygon)
+			result=polygonTaggedText((IPolygon)object);
+		else if (object instanceof ILineString)
+			result=lineStringTaggedText((ILineString)object);
+		else if (object instanceof IAggregate)
+			result=geometryCollectionTaggedText((IAggregate)object);
+		else if (object instanceof IRing)
+			result=ringTaggedText((IRing)object);
+		return result;
+	}
+   
+    public static String makeWkt(List<?> geomList)
+    {
+    	StringBuffer result=new StringBuffer();
+    	Iterator<?> i=geomList.iterator();
+    	while (i.hasNext()) {
+    		IGeometry geom=(IGeometry)i.next();
+    		String wkt=makeWkt(geom);
+    		result.append(wkt);
+    		result.append('\n');
+    	}
+    	return result.toString();
+    }
+
+    /*- Read from stream ----------------------------------*/
+    
+    public static IGeometry readGeOxygeneFromWkt(BufferedReader in)
+    throws IOException,ParseException
+    {
+    	String wkt=in.readLine();
+    	return makeGeOxygene(wkt);
+    }
+    
+    public static IGeometry readGeOxygeneFromWkt(InputStream in)
+    throws IOException,ParseException
+    {
+    	return readGeOxygeneFromWkt(new BufferedReader(new InputStreamReader(in)));
+    }
+    
+    public static IGeometry readGeOxygeneFromWkt(String path)
+    throws FileNotFoundException,IOException,ParseException
+    {
+    	return readGeOxygeneFromWkt(new FileInputStream(path));
+    }
+
+    /*- Write to stream -----------------------------------*/
+
+    public static void writeWkt(String path, boolean append, IGeometry geom)
+    throws IOException
+    {
+		writeWkt(new FileOutputStream(path, append), geom);
+    }
+
+    public static void writeWkt(String path, IGeometry geom)
+    throws IOException
+    {
+		writeWkt(new FileOutputStream(path), geom);
+    }
+
+    public static void writeWkt(OutputStream out, IGeometry geom)
+    throws IOException
+    {
+        new PrintStream(out).println(makeWkt(geom));
+    }
+
+    public static void writeWkt(OutputStream out, List<?> geomList)
+    throws IOException
+    {
+        Iterator<?> i=geomList.iterator();
+        while (i.hasNext()) {
+            IGeometry geom=(IGeometry)i.next();
+            writeWkt(out,geom);
+        }
+    }
+
+    /*-----------------------------------------------------*/
+    /*- Create IGeometry from Wkt object(s) ---------------*/
+    /*-----------------------------------------------------*/
+
+    public static List<?> makeGeOxygeneList(String inStrArray[])
+	throws ParseException
+    {
+        ArrayList<IGeometry> list=new ArrayList<IGeometry>();
+        for (int i=0; i<inStrArray.length; i++) {
+            list.add(makeGeOxygene(inStrArray[i]));
+        }
+        return list;
+    }
+    
+    static IGeometry makeGeOxygene(InputStream in)
+    throws ParseException
+    {
+        WktGeOxygene parser=new WktGeOxygene(in);
+        IGeometry geom=null;
+
+        try {
+            geom=parser.parseOneLine();
+        }
+        catch (EndOfFile x) {}
+        catch (EmptyLine x) {}
+
+        return geom;
+    }
+
+    public static List<?> makeGeOxygeneList(File file)
+    throws Exception
+    {
+        return makeGeOxygeneList(new FileInputStream(file));
+    }
+    
+    public static List<?> makeGeOxygeneList(String wkt)
+    throws Exception
+    {
+    	InputStream in=new ByteArrayInputStream(wkt.getBytes());
+    	return makeGeOxygeneList(in);
+    }
+
+    public static List<?> makeGeOxygeneList(InputStream in)
+    throws ParseException
+    {
+        ArrayList<IGeometry> list=new ArrayList<IGeometry>();
+        WktGeOxygene parser=new WktGeOxygene(in);
+
+        while (true) {
+            try {
+                IGeometry geom=parser.parseOneLine();
+                list.add(geom);
+			} catch (EndOfFile x) {
+                break;
+            } catch (EmptyLine x) {}
+        }
+        return list;
+    }
+
+    public static IGeometry makeGeOxygene(String inStr)
+    throws ParseException
+    {
+        InputStream in=new ByteArrayInputStream(inStr.getBytes());
+        return makeGeOxygene(in);
+    }
+}
+
+PARSER_END(WktGeOxygene)
+
+TOKEN:
+{
+    <CONSTANT: (["-","+"])? (
+         <FLOAT>
+         |<FLOAT>(["e","E"] (["-","+"])?<INTEGER>)?)
+    >
+    |
+    <#FLOAT:
+            <INTEGER>
+            |<INTEGER>("."<INTEGER>)?
+            |"."<INTEGER>
+    >
+    | <INTEGER: (<DIGIT>)+>
+    | <#DIGIT: ["0" - "9"]>
+}
+
+TOKEN:
+{
+    <POINT: <CONSTANT>((" ")+<CONSTANT>)+>
+}
+
+TOKEN:
+{
+    <EOL: "\n">
+}
+
+SKIP:
+{
+    "\t"|" "
+}
+
+IDirectPosition point():
+{
+    IDirectPosition p;
+    Token xy;
+}
+{
+    xy=<POINT>
+    {
+        StringTokenizer tkz=new StringTokenizer(xy.image);
+        String xStr=tkz.nextToken();
+        String yStr=tkz.nextToken();
+        if (tkz.hasMoreTokens()) {
+        	// récupération de la 3eme coordonnée si elle existe
+        	String zStr=tkz.nextToken();
+        	if (tkz.hasMoreTokens()) {
+        		// si il y en a une 4ème, alors on est en XYZM et on prend Z
+        		// sinon, on est en XYM et on ignore la mesure car elle n'est pas gérée par le type DirectPosition
+        		p=new DirectPosition(Double.parseDouble(xStr), Double.parseDouble(yStr), Double.parseDouble(zStr));
+				return p;
+			}
+        	p=new DirectPosition(Double.parseDouble(xStr), Double.parseDouble(yStr), Double.parseDouble(zStr));
+            return p;
+		}        
+        p=new DirectPosition(
+            Double.parseDouble(xStr), Double.parseDouble(yStr));
+    	try {return p;} catch (Exception e) {System.out.println(e);}
+    }
+}
+
+IDirectPosition pointText():
+{IDirectPosition p=new DirectPosition();}
+{
+    ("(" p=point() ")" | "EMPTY")
+    {try {return p;} catch (Exception e) {System.out.println(e);}}
+}
+
+ILineString linestringText():
+{
+    ILineString lineString=new GM_LineString();
+    IDirectPosition p;
+}
+{
+    ("("
+    p=point() {lineString.addControlPoint(p);}
+    ("," p=point() {lineString.addControlPoint(p);})*
+    ")"
+    | "EMPTY")
+    {try {return lineString;} catch (Exception e) {System.out.println(e);}}
+}
+
+IPolygon polygonText():
+{
+    IPolygon polygon=new GM_Polygon();
+    ILineString lineString;
+}
+{
+    ("("
+    lineString=linestringText() {
+   		polygon=new GM_Polygon(lineString);
+   	}
+    (
+        ","
+        lineString=linestringText() {
+            polygon.addInterior(new GM_Ring(lineString));
+        }
+    )*
+    ")"
+    | "EMPTY")
+    {try {return polygon;} catch (Exception e) {System.out.println(e);}}
+}
+
+IMultiPoint multipointText():
+{
+    IMultiPoint multiPoint=new GM_MultiPoint();
+    IDirectPosition p;
+}
+{
+    ("("
+    p=point() {multiPoint.add(new GM_Point(p));}
+    ("," p=point() {multiPoint.add(new GM_Point(p));})*
+    ")"
+    | "EMPTY")
+    {try {return multiPoint;} catch (Exception e) {System.out.println(e);}}
+}
+
+IMultiCurve multilinestringText():
+{
+    IMultiCurve multiLineString=new GM_MultiCurve();
+    ILineString lineString;
+}
+{
+    ("("
+    lineString=linestringText() {multiLineString.add(lineString);}
+    ("," lineString=linestringText()
+        {multiLineString.add(lineString);})*
+    ")"
+    | "EMPTY")
+    {try {return multiLineString;} catch (Exception e) {System.out.println(e);}}
+}
+
+IMultiSurface multipolygonText():
+{
+    IMultiSurface multiPolygon=new GM_MultiSurface();
+    IPolygon polygon;
+}
+{
+    ("("
+    polygon=polygonText() {multiPolygon.add(polygon);}
+    ("," polygon=polygonText() {multiPolygon.add(polygon);})*
+    ")"
+    | "EMPTY")
+    {try {return multiPolygon;} catch (Exception e) {System.out.println(e);}}
+}
+
+IAggregate geometrycollectionText():
+{
+    IAggregate geometryCollection=new GM_Aggregate();
+    IGeometry geometry;
+}
+{
+    ("("
+    geometry=geometryTaggedText() {geometryCollection.add(geometry);}
+    ("," geometry=geometryTaggedText()
+        {geometryCollection.add(geometry);}
+    )*
+    ")"
+    | "EMPTY")
+    {try {return geometryCollection;} catch (Exception e) {System.out.println(e);}}
+}
+
+IPoint pointTaggedText():
+{IDirectPosition p;}
+{
+    "POINT" ("Z"|"M")?
+    (p=pointText()
+    {try {return new GM_Point(p);} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+IMultiPoint multipointTaggedText():
+{IMultiPoint mp;}
+{
+    "MULTIPOINT" ("Z"|"M")?
+    (mp=multipointText()
+    {try {return mp;} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+ILineString linestringTaggedText():
+{ILineString lineString;}
+{
+    "LINESTRING" ("Z"|"M")?
+    (lineString=linestringText()
+    {try {return lineString;} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+IMultiCurve multilinestringTaggedText():
+{IMultiCurve multiLineString;}
+{
+    "MULTILINESTRING" ("Z"|"M")?
+    (multiLineString=multilinestringText()
+    {try {return multiLineString;} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+IPolygon polygonTaggedText():
+{IPolygon poly;}
+{
+    "POLYGON" ("Z"|"M")?
+    (poly=polygonText()
+    {try {return poly;} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+IMultiSurface multipolygonTaggedText():
+{IMultiSurface mp;}
+{
+    "MULTIPOLYGON" ("Z"|"M")?
+    (mp=multipolygonText()
+    {try {return mp;} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+IAggregate geometrycollectionTaggedText():
+{IAggregate o;}
+{
+    "GEOMETRYCOLLECTION"
+    (o=geometrycollectionText()
+    {try {return o;} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+int sridText():
+{Token srid;}
+{
+	"SRID="
+    srid=<CONSTANT>
+    ";"
+    {
+        StringTokenizer tkz=new StringTokenizer(srid.image);
+	    String str=tkz.nextToken();
+		return Integer.parseInt(str);
+	}
+}
+
+IGeometry geometryTaggedText():
+{
+IGeometry o;
+int srid = -1;
+}
+{
+	(srid=sridText())?
+    (
+    o=pointTaggedText()
+    | o=linestringTaggedText()
+    | o=polygonTaggedText()
+    | o=multipointTaggedText()
+    | o=multilinestringTaggedText()
+    | o=multipolygonTaggedText()
+    | o=geometrycollectionTaggedText()
+    )
+    {try {
+    	if (srid != -1) { o.setCRS(srid); }
+    	return o;
+    } catch (Exception e) {System.out.println(e);}}
+}
+
+IGeometry parseOneLine() throws EmptyLine,EndOfFile:
+{IGeometry o;}
+{
+    (o=geometryTaggedText())(<EOL>|<EOF>) {try {return o;} catch (Exception e) {System.out.println(e);}}
+    | <EOL> {try {return null;} catch (Exception e) {System.out.println(e);}}
+    | <EOF> {try {return null;} catch (Exception e) {System.out.println(e);}}
+}

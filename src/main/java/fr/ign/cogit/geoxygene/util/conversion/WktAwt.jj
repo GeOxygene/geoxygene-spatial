@@ -1,0 +1,322 @@
+/*
+ * This file is part of the GeOxygene project source files. 
+ * 
+ * GeOxygene aims at providing an open framework which implements OGC/ISO specifications for 
+ * the development and deployment of geographic (GIS) applications. It is a open source 
+ * contribution of the COGIT laboratory at the Institut Géographique National (the French 
+ * National Mapping Agency).
+ * 
+ * See: http://oxygene-project.sourceforge.net 
+ *  
+ * Copyright (C) 2005 Institut Géographique National
+ *
+ * This library is free software; you can redistribute it and/or modify it under the terms
+ * of the GNU Lesser General Public License as published by the Free Software Foundation; 
+ * either version 2.1 of the License, or any later version.
+ *
+ * This library is distributed in the hope that it will be useful, but WITHOUT ANY 
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A 
+ * PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with 
+ * this library (see file LICENSE if present); if not, write to the Free Software 
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *  
+ */
+
+options {
+	STATIC=false;
+}
+
+PARSER_BEGIN(WktAwt)
+
+package fr.ign.cogit.geoxygene.util.conversion;
+
+import java.util.StringTokenizer;
+
+import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+
+import java.awt.geom.Point2D;
+import java.awt.geom.Ellipse2D;
+import java.awt.geom.GeneralPath;
+
+@SuppressWarnings("unchecked")
+public class WktAwt
+{
+    static class EndOfFile extends Exception {private static final long serialVersionUID = 1L;}
+    static class EmptyLine extends Exception {private static final long serialVersionUID = 1L;}
+
+    /*-----------------------------------------------------*/
+    /*- Create AwtShape from Wkt object(s) ----------------*/
+    /*-----------------------------------------------------*/
+
+    public static AwtShape makeAwtShape(InputStream in)
+	throws ParseException
+    {
+        WktAwt parser=new WktAwt(in);
+        AwtAggregate geom=new AwtAggregate();
+
+        while (true) {
+            try {
+                geom.add(parser.parseOneLine());
+            } catch (EndOfFile e) {
+                break;
+            } catch (EmptyLine e) {}
+        }
+        return geom;
+    }
+
+    public static AwtShape makeAwtShape(String wkt)
+    throws ParseException
+    {
+        InputStream in=new ByteArrayInputStream(wkt.getBytes());
+        return makeAwtShape(in);
+    }
+
+    /*-----------------------------------------------------*/
+    /*- Main function for testing -------------------------*/
+    /*-----------------------------------------------------*/
+
+    static Ellipse2D makeVisiblePoint(Point2D point)
+    {
+        return new Ellipse2D.Double(point.getX()-5, point.getY()-5, 10, 10);
+    }
+}
+
+PARSER_END(WktAwt)
+
+TOKEN:
+{
+    <CONSTANT: (["-","+"])? (
+         <FLOAT>
+         |<FLOAT>(["e","E"] (["-","+"])?<INTEGER>)?)
+    >
+    |
+    <#FLOAT:
+            <INTEGER>
+            |<INTEGER>("."<INTEGER>)?
+            |"."<INTEGER>
+    >
+    | <#INTEGER: (<DIGIT>)+>
+    | <#DIGIT: ["0" - "9"]>
+}
+
+TOKEN:
+{
+    <POINT: <CONSTANT>(" ")+<CONSTANT>>
+}
+
+TOKEN:
+{
+    <EOL: "\n">
+}
+
+SKIP:
+{
+    "\t"|" "
+}
+
+Point2D point():
+{Token xy;}
+{
+    xy=<POINT>
+    {
+    	try {
+	        StringTokenizer tkz=new StringTokenizer(xy.image);
+	        String xStr=tkz.nextToken();
+	        String yStr=tkz.nextToken();
+	        double x=Double.parseDouble(xStr);
+	        double y=Double.parseDouble(yStr);
+	        return new Point2D.Double(x,y);
+        } catch (Exception e) {System.out.println(e);}
+    }
+}
+
+Point2D pointText():
+{Point2D p=new Point2D.Double(Double.NaN, Double.NaN);}
+{
+    ("(" p=point() ")" | "EMPTY")
+    {try {return p;} catch (Exception e) {System.out.println(e);}}
+}
+
+GeneralPath linestringText():
+{
+    GeneralPath lineString=new GeneralPath();
+    Point2D p;
+}
+{
+   	("("
+    p=point() {lineString.moveTo((float)p.getX(), (float)p.getY());}
+    ("," p=point() {lineString.lineTo((float)p.getX(), (float)p.getY());}
+    )*
+    ")"
+    | "EMPTY")
+    {try {return lineString;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape polygonText():
+{
+	AwtSurface poly=new AwtSurface();
+	GeneralPath lineString;
+}
+{
+    ("("
+    lineString=linestringText() {
+        lineString.closePath();
+        poly=new AwtSurface(lineString);
+    }
+    ("," lineString=linestringText() {
+        lineString.closePath();
+        poly.addInterior(lineString);
+    }
+    )*
+    ")"
+    | "EMPTY")
+    {try {return poly;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape multipointText():
+{
+    GeneralPath multi=new GeneralPath();
+    Point2D p;
+}
+{
+    ("("
+    p=point() {multi.append(new GeneralPath(makeVisiblePoint(p)), false);}
+    ("," p=point() {multi.append(new GeneralPath(makeVisiblePoint(p)), false);}
+    )*
+    ")"
+    | "EMPTY")
+    {try {return new AwtSurface(multi);} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape multilinestringText():
+{
+    GeneralPath multi=new GeneralPath();
+    GeneralPath lineString;
+}
+{
+    ("("
+    lineString=linestringText() {multi.append(lineString,false);}
+    ("," lineString=linestringText() {multi.append(lineString,false);}
+    )*
+    ")"
+    | "EMPTY")
+    {try {return new AwtOutline(multi);} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape multipolygonText():
+{
+    AwtAggregate multi=new AwtAggregate();
+    AwtShape poly;
+}
+{
+    ("("
+    poly=polygonText() {multi.add(poly);}
+    ("," poly=polygonText() {multi.add(poly);}
+    )*
+    ")"
+    | "EMPTY")
+    {try {return multi;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape geometrycollectionText():
+{
+    AwtAggregate collec=new AwtAggregate();
+    AwtShape geom;
+}
+{
+    ("("
+    geom=geometryTaggedText() {collec.add(geom);}
+    ("," geom=geometryTaggedText() {collec.add(geom);}
+    )*
+    ")"
+    | "EMPTY")
+    {try {return collec;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape pointTaggedText():
+{Point2D p;}
+{
+    "POINT"
+    (p=pointText()
+    	{try {return new AwtSurface(makeVisiblePoint(p));} catch (Exception e) {System.out.println(e);}}
+    )
+}
+
+AwtShape linestringTaggedText():
+{
+    GeneralPath lineString;
+}
+{
+    "LINESTRING" 
+    lineString=linestringText()
+    {try {return new AwtOutline(lineString);} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape multipointTaggedText():
+{AwtShape multi;}
+{
+    "MULTIPOINT"
+    multi=multipointText()
+    {try {return multi;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape multilinestringTaggedText():
+{AwtShape multi;}
+{
+    "MULTILINESTRING"
+    multi=multilinestringText()
+    {try {return multi;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape polygonTaggedText():
+{AwtShape poly;}
+{
+    "POLYGON" 
+    poly=polygonText()
+    {try {return poly;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape multipolygonTaggedText():
+{AwtShape multi;}
+{
+    "MULTIPOLYGON"
+    multi=multipolygonText()
+    {try {return multi;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape geometrycollectionTaggedText():
+{AwtShape collec;}
+{
+    "GEOMETRYCOLLECTION"
+    collec=geometrycollectionText()
+    {try {return collec;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape geometryTaggedText():
+{
+    AwtShape geom;
+}
+{
+    (geom=pointTaggedText()
+    | geom=linestringTaggedText()
+    | geom=polygonTaggedText()
+    | geom=multipointTaggedText()
+    | geom=multilinestringTaggedText()
+    | geom=multipolygonTaggedText()
+    | geom=geometrycollectionTaggedText())
+    {try {return geom;} catch (Exception e) {System.out.println(e);}}
+}
+
+AwtShape parseOneLine() throws EmptyLine,EndOfFile:
+{
+    AwtShape geom;
+}
+{
+    (geom=geometryTaggedText())(<EOF>|<EOL>)
+    {try {return geom;} catch (Exception e) {System.out.println(e);}}
+    | <EOL> {try {return null;} catch (Exception e) {System.out.println(e);}}
+    | <EOF> {try {return null;} catch (Exception e) {System.out.println(e);}}
+}
